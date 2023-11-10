@@ -932,11 +932,11 @@ cc_clusters <- cc_clusters %>%
 cc_clusters$value <- as.factor(cc_clusters$value)
 
 
-cc_clusters %>% ggplot(.,aes(x=PC1,y=PC2,fill=value)) +
+cc_clusters %>% ggplot(.,aes(x=PC1,y=PC2,fill=model)) +
   geom_point(shape=21,size=3,alpha=0.6) +
   theme_wl() +
   facet_wrap(.~label) +
-  theme(legend.position="none") +
+  #theme(legend.position="none") +
   labs(title=paste0("Principal components explaining ",signif(sum(pca_variance[1:2]),2), "% of residual subsector emissions variance"))
 
 
@@ -1345,6 +1345,11 @@ saveWorkbook(wb_figures,"../Results/figure_data.xlsx",overwrite=T)
 saveWorkbook(wb_analysis,"../Results/analysis.xlsx",overwrite=T)
 #saveWorkbook(wb_data,"../Results/processed_data.xlsx",overwrite=T)
 
+
+write.csv(wd_scenarios_emissions %>%
+             filter(var!="Kyoto Gases") %>%
+             filter(!grepl("Carbon Sequestration",var)),
+          file="residual-emissions-ERL-processed-data.csv",sep=";")
 
 
 ```
