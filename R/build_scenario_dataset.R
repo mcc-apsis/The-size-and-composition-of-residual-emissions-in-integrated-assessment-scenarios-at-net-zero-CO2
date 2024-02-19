@@ -98,12 +98,12 @@ data_r5 <- data_r5 %>%
 ## infill the years
 
 data_r1 <- data_r1 %>%
-  filter(year>=2020) %>%
+  filter(year>=2015) %>%
   group_by(model,scenario,category,var,unit,region) %>%
   mutate(value=zoo::na.approx(value,na.rm=FALSE))
 
 data_r5 <- data_r5 %>%
-  filter(year>=2020) %>%
+  filter(year>=2015) %>%
   group_by(model,scenario,category,var,unit,region) %>%
   mutate(value=zoo::na.approx(value,na.rm=FALSE))
 
