@@ -128,9 +128,6 @@ wd_scenarios_emissions <- rbind(wd_scenarios_emissions,wd_co2_other_fix)
 
 blarg <- wd_scenarios_emissions %>% filter(id=="IMAGE 3.0|EN_NPi2020_1000") %>% filter(year==2050)
 
-## save the non-resolved version
-wd_scenarios_emissions_org <- wd_scenarios_emissions
-
 ## resolve sector and gas inconsistencies
 wd_sector_totals <- wd_scenarios_emissions %>% 
   ungroup() %>% 
@@ -144,56 +141,81 @@ wd_gas_totals <- wd_scenarios_emissions %>%
   group_by(id,model,scenario,year,gas) %>% 
   summarise(gas_total=sum(value_gwp))
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>%
+###
+blarg <- wd_scenarios_emissions %>% 
+  filter(!is.na(gas)) %>% 
+  arrange(year,var)
+  
+wd <- wd_scenarios_emissions %>% 
   filter(!is.na(sector)) %>%
   filter(!is.na(subsector)) %>%
   filter(subsector!="Total") %>%
-  group_by(id,model,scenario,category,gas,sector,subsector,year) %>%
-  summarise(value_gwp=sum(value_gwp,na.rm=TRUE))
+  group_by(id,model,scenario,category,var,gas,sector,subsector,year) %>%
+  summarise(value_gwp=sum(value_gwp,na.rm=TRUE)) %>% 
+  arrange(year,var)
 
 # sector inconsistencies
-wd_scenarios_emissions <- full_join(wd_scenarios_emissions,wd_sector_totals,by = join_by(id, model, scenario, year, gas,sector))
+wd <- full_join(wd,wd_sector_totals,
+                by = join_by(id, model, scenario,year,gas,sector)) %>% 
+  arrange(id,year,var)
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>%
+wd <- wd %>%
   mutate(value_gwp=ifelse(is.na(subsector),sector_total,value_gwp)) %>%
   mutate(subsector=ifelse(is.na(subsector),"Other",subsector))
 
-residuals <- wd_scenarios_emissions %>%
+residuals <- wd %>%
   group_by(id,model,scenario,year,gas,sector) %>%
   summarise(value_gwp=sum(value_gwp),sector_total=first(sector_total)) %>%
   mutate(value_gwp=sector_total-value_gwp) %>%
   mutate(subsector="Other") %>%
-  select(-sector_total) %>%
-  filter(value_gwp>0)
+  select(-sector_total)# %>%
+  #filter(value_gwp>0)
 
-wd_scenarios_emissions <- rbind(wd_scenarios_emissions,residuals)
-
+wd <- rbind(wd,residuals)
+# 
+# wd <- wd %>% 
+#   group_by(id,model,scenario,category,year,gas,sector,subsector) %>% 
+#   summarise(value_gwp=sum(value_gwp))
 
 ## gas inconsistencies
-wd_scenarios_emissions <- left_join(wd_scenarios_emissions %>% select(-sector_total),wd_gas_totals,by = join_by(id, model, scenario, year, gas))
+wd <- left_join(wd,wd_gas_totals,
+                by = join_by(id, model, scenario, year, gas))
 
-residuals <- wd_scenarios_emissions %>%
+
+residuals <- wd %>%
   group_by(id,model,scenario,year,gas) %>%
   summarise(value_gwp=sum(value_gwp),gas_total=first(gas_total))%>%
   mutate(value_gwp=gas_total-value_gwp) %>%
   mutate(sector="Other") %>%
-  select(-gas_total) %>%
-  filter(value_gwp>0)
+  select(-gas_total) #%>%
+  #filter(value_gwp>0)
 
-wd_scenarios_emissions <- rbind(wd_scenarios_emissions,residuals)
-
+wd <- rbind(wd,residuals)
+wd <- wd %>% 
+  arrange(id,year,gas,sector)
 
 ## tidy up naming conventions
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+wd_scenarios_emissions <- wd %>% 
   mutate(var=ifelse(sector=="Other",paste0(gas,"|",sector),paste0(gas,"|",sector,"|",subsector))) %>% 
   mutate(var=ifelse(var=="F-Gases|F-Gases|Other","F-Gases",var)) %>% 
   mutate(var=ifelse(var=="CO2|AFOLU|Other","CO2|AFOLU",var)) %>% 
   mutate(var=ifelse(var=="N2O|AFOLU|Other","N2O|AFOLU",var)) %>% 
   mutate(var=ifelse(var=="CH4|Energy|Other","CH4|Energy",var)) %>% 
   mutate(var=ifelse(var=="CO2|Industrial processes|Other","CO2|Industrial processes",var)) %>% 
+  mutate(var=ifelse(gas=="F-Gases","F-Gases",var)) %>%
   mutate(var=ifelse(gas=="Kyoto Gases","Kyoto Gases",var)) %>% 
-  mutate(subsector=ifelse(is.na(subsector),"Other",subsector))
+  mutate(subsector=ifelse(is.na(subsector),"Other",subsector)) %>% 
+  mutate(sector=ifelse(gas=="F-Gases","F-Gases",sector)) %>% 
+  mutate(sector=ifelse(gas=="Kyoto Gases","Total",sector))
+
+wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+  group_by(id,model,scenario) %>% 
+  mutate(category=first(category))
+
+wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+  group_by(id,model,scenario,category,year,var,gas,sector,subsector) %>% 
+  summarise(value_gwp=sum(value_gwp,na.rm=TRUE))
 
 ## save the updated list of sectors
 cc_sectors <- wd_scenarios_emissions %>% 
@@ -201,16 +223,76 @@ cc_sectors <- wd_scenarios_emissions %>%
   select(gas,sector,subsector,var) %>% 
   distinct()
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
-  group_by(id,model,scenario) %>% 
-  mutate(category=first(category))
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
-  group_by(id,model,scenario,category,gas,sector,subsector,var,year) %>% 
-  summarise(value_gwp=sum(value_gwp,na.rm=TRUE))
+```
+
+```{r check_net_emissions}
+
+## check if the bottom-up estimated totals equal the original reporting
+
+check_co2 <- wd_scenarios_emissions %>% 
+  group_by(id,year,gas) %>% 
+  summarise(value=sum(value_gwp,na.rm=TRUE))
+
+check_co2_native <- data_r1 %>% 
+  filter(var %in% c("Emissions|CO2",
+                    "Emissions|CH4",
+                    "Emissions|N2O",
+                    "Emissions|F-Gases")) %>%
+  mutate(id=paste0(model,"|",scenario)) %>%
+  ungroup() %>%
+  select(id,year,var,value_native=value)
+
+check_co2_native <- check_co2_native %>% 
+  mutate(gas=ifelse(grepl("CO2",var),"CO2",NA)) %>% 
+  mutate(gas=ifelse(grepl("CH4",var),"CH4",gas)) %>% 
+  mutate(gas=ifelse(grepl("N2O",var),"N2O",gas)) %>% 
+  mutate(gas=ifelse(grepl("F-Gases",var),"F-Gases",gas))
+
+check_co2_native <- check_co2_native %>% 
+  mutate(value_native=ifelse(gas=="CH4",value_native*27,value_native)) %>% 
+  mutate(value_native=ifelse(gas=="N2O",(value_native*273.0)/1000,value_native))
+  
+
+check_co2 <- left_join(check_co2,check_co2_native %>% select(-var))
+check_co2 <- check_co2 %>% 
+  mutate(difference=value-value_native) %>% 
+  filter(abs(difference)>1)
+
+
+
+## Check for major discrepancies between the reconstructed sectors and the Kyoto gas total
+check_kyoto <- wd_scenarios_emissions %>%
+  filter(gas!="Kyoto Gases") %>%
+  group_by(id,year) %>%
+  summarise(recalculated_net_emissions=sum(value_gwp,na.rm=TRUE))
+
+check_kyoto <- left_join(check_kyoto,wd_scenarios_emissions %>% 
+                           ungroup %>% 
+                           filter(gas=="Kyoto Gases") %>% 
+                           filter(sector=="Total") %>% 
+                           select(id,year,native_net_emissions=value_gwp),
+                         by = join_by(id,year))
+
+check_kyoto <- check_kyoto %>%
+  mutate(difference=recalculated_net_emissions-native_net_emissions) %>%
+  mutate(difference_abs=abs(difference))
+
+check_kyoto <- left_join(check_kyoto,cc_scenarios %>% select(id) %>% mutate(include=1)) %>% 
+  filter(include==1) %>% 
+  select(-include)
+
+check_kyoto <- check_kyoto %>%
+  group_by(year) %>%
+  summarise(median=signif(median(difference_abs),2),
+            percentile_5th = signif(quantile(difference_abs, probs = c(0.05)),2),
+            percentile_95th = signif(quantile(difference_abs, probs = c(0.95)),2))
+
 
 
 ```
+
+
 
 ```{r resolve_gross_emissions_and_removals}
 
@@ -255,38 +337,6 @@ wd_scenarios_removals <- wd_scenarios_removals %>%
 cc_scenarios <- anti_join(cc_scenarios,wd_scenarios_removals %>% filter(is.na(`Carbon Sequestration|Land Use`)) %>% select(id))
 
 
-## Check for major discrepancies between the reconstructed sectors and the Kyoto gas total
-test_residual <- wd_scenarios_emissions %>%
-  #filter(year==2050) %>%
-  filter(gas!="Kyoto Gases") %>%
-  group_by(id,year) %>%
-  summarise(recalculated_net_emissions=sum(value_gwp,na.rm=TRUE))
-
-test_residual <- left_join(test_residual,wd_scenarios_emissions %>% ungroup %>% filter(gas=="Kyoto Gases") %>% select(id,year,native_net_emissions=value_gwp),by = join_by(id,year))
-
-test_residual <- left_join(test_residual,
-                           wd_scenarios_emissions %>% 
-                             ungroup %>%
-                             filter(gas=="CO2") %>%
-                            group_by(id,year) %>%  summarise(recalulated_net_CO2_emissions=sum(value_gwp,na.rm=TRUE)) %>% 
-                             select(id,year,recalulated_net_CO2_emissions),
-                          by = join_by(id,year))
-
-test_residual <- test_residual %>%
-  mutate(difference=recalculated_net_emissions-native_net_emissions) %>%
-  mutate(difference_abs=abs(difference))
-
-test_residual <- left_join(test_residual,cc_scenarios %>% select(id) %>% mutate(include=1)) %>% 
-  filter(include==1) %>% 
-  select(-include)
-
-test_residual_stat <- test_residual %>%
-  group_by(year) %>%
-  summarise(median=signif(median(difference_abs),2),
-            percentile_5th = signif(quantile(difference_abs, probs = c(0.05)),2),
-            percentile_95th = signif(quantile(difference_abs, probs = c(0.95)),2))
-
-
 ## tidy up 
 wd_scenarios_removals <- gather(wd_scenarios_removals,var,value_gwp,`Carbon Sequestration|CCS|Biomass`:`Carbon Sequestration|Other`) %>% 
   filter(var %in% c("Carbon Sequestration|CCS|Biomass",
@@ -297,24 +347,36 @@ wd_scenarios_removals <- gather(wd_scenarios_removals,var,value_gwp,`Carbon Sequ
 
 ## join data to main dataset
 wd_scenarios_emissions <- rbind(wd_scenarios_emissions,wd_scenarios_removals) %>% 
-  arrange(id,year)
+  arrange(id,year,var)
 
 
-## calculate gross emissions by sector
-wd_scenarios_emissions <- spread(wd_scenarios_emissions %>% 
+## check whats going on with IMAGE / Industrial process CCS
+# check_ind <- wd_scenarios_emissions %>%
+#   filter(id=="IMAGE 3.2|SSP1_SPA1_19I_D_LB") %>%
+#   filter(var %in% c("CO2|Industrial processes",
+#                     "Carbon Sequestration|CCS|Biomass|Industrial Processes",
+#                     "CO2|Other"))
+# 
+# ggplot(check_ind,aes(x=year,y=value,color=var)) +
+#   geom_path()
+
+
+## calculate gross emissions by sector 
+wd <- spread(wd_scenarios_emissions %>% 
                   ungroup() %>% 
                   select(id,model,scenario,category,year,var,value_gwp),var,value_gwp)
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
-   mutate(`CO2|Energy|Supply`=`CO2|Energy|Supply`+`Carbon Sequestration|CCS|Biomass`) %>% 
-   mutate(`CO2|AFOLU`=`CO2|AFOLU`+`Carbon Sequestration|Land Use`) %>% 
-   mutate(`CO2|Other`=`CO2|Other`+`Carbon Sequestration|Other`)
+wd <- wd %>% 
+  mutate(`CO2|Energy|Supply`=`CO2|Energy|Supply`+`Carbon Sequestration|CCS|Biomass`) %>% 
+  mutate(`CO2|AFOLU`=`CO2|AFOLU`+`Carbon Sequestration|Land Use`) %>% 
+  mutate(`CO2|Other`=`CO2|Other`+`Carbon Sequestration|Other`) %>% 
+  mutate(`CO2|Other`=`CO2|Other`+`Carbon Sequestration|CCS|Biomass|Industrial Processes`)
 
-wd_scenarios_emissions <- gather(wd_scenarios_emissions,var,value,-id,-model,-scenario,-category,-year)
-wd_scenarios_emissions <- left_join(wd_scenarios_emissions,cc_sectors,by="var")
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
-  select(id,model,scenario,category,gas,sector,subsector,var,year,value)
-
+wd <- gather(wd,var,value,-id,-model,-scenario,-category,-year)
+wd <- left_join(wd,cc_sectors,by="var")
+wd <- wd %>% 
+  select(id,model,scenario,category,var,gas,sector,subsector,year,value) %>% 
+  arrange(id,year,var)
 
 
 ## source the net zero years from scenario metadata
@@ -326,23 +388,23 @@ cc_netzero <- left_join(cc_netzero,cc_scenarios %>% mutate(include=1),by="id") %
   filter(include==1) %>% 
   select(-include)
 
-wd_scenarios_emissions <- left_join(wd_scenarios_emissions,cc_netzero,by="id")
+wd <- left_join(wd,cc_netzero,by="id")
 
 
 ## exclude the scenarios that don't reach net zero by 2100 and tidy up
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+wd <- wd %>% 
   filter(!is.na(net_zero_CO2)) %>% 
   arrange(id,year) %>% 
   mutate(value=value/1000)
 
-no_scenarios <- wd_scenarios_emissions %>% 
+no_scenarios <- wd %>% 
   select(id) %>%
   distinct()
 
 
 ## simplify the model names
 
-wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+wd_scenarios_emissions <- wd %>% 
   mutate(model=ifelse(grepl("IMAGE",model),"IMAGE",model)) %>% 
   mutate(model=ifelse(grepl("MESSAGE",model),"MESSAGE",model)) %>% 
   mutate(model=ifelse(grepl("REMIND",model),"REMIND",model))
@@ -362,7 +424,65 @@ wd_scenarios_emissions$sector <- fct_relevel(wd_scenarios_emissions$sector,"Ener
 
 ```
 
+```{r check_net_zero_years}
 
+wd_check <- wd_scenarios_emissions %>% 
+  filter(gas=="CO2") %>% 
+  group_by(id,year,net_zero_CO2) %>% 
+  summarise(value=sum(value,na.rm=TRUE))
+
+wd_check <- left_join(wd_check,wd_scenarios_emissions %>% 
+                     filter(grepl("Carbon Sequestration",var)) %>% 
+                     group_by(id,year) %>% 
+                     summarise(removals=sum(value,na.rm=TRUE)))
+
+wd_check <- wd_check %>% 
+  mutate(totals=value-removals)
+
+####
+wd_check <- left_join(wd_check,data_r1 %>% 
+                     ungroup() %>% 
+                     mutate(id=paste0(model,"|",scenario)) %>%
+                     filter(var=="Emissions|CO2") %>%
+                     mutate(value=value/1000) %>% 
+                     select(id,year,native_co2=value),
+                   by = join_by(id, year))
+
+wd_check <- wd_check %>% 
+  mutate(difference=totals-native_co2)
+
+wd_check <- left_join(wd_check,data_r1 %>% 
+                     ungroup() %>% 
+                     mutate(id=paste0(model,"|",scenario)) %>%
+                     filter(var=="AR6 climate diagnostics|Infilled|Emissions|CO2") %>%
+                     mutate(value=value/1000) %>% 
+                     select(id,year,infilled_co2=value),
+                   by = join_by(id, year))
+
+wd_check_years <- wd_check %>% 
+  filter(totals<0) %>% 
+  group_by(id) %>% 
+  summarise(native_net_zero_CO2=first(year))
+
+wd_check <- left_join(wd_check,wd_check_years)
+
+wd_scenarios_emissions <- left_join(wd_scenarios_emissions,wd_check_years,by="id")
+wd_scenarios_emissions <- wd_scenarios_emissions %>% 
+  mutate(native_net_zero_CO2=ifelse(is.na(native_net_zero_CO2),2100,native_net_zero_CO2))
+
+wd_check <- wd_scenarios_emissions %>% 
+  select(id,native_net_zero_CO2,net_zero_CO2) %>% 
+  distinct() %>% 
+  mutate(difference=native_net_zero_CO2-net_zero_CO2) %>% 
+  mutate(group="group") %>% 
+  group_by(group) %>% 
+  summarise(median=signif(median(difference),2),
+            percentile_5th = signif(quantile(difference, probs = c(0.05)),2),
+            percentile_95th = signif(quantile(difference, probs = c(0.95)),2))
+  
+
+
+```
 
 
 ```{r check_gross_negative}
@@ -380,30 +500,6 @@ check <- wd_scenarios_emissions %>%
 
 check <- median_and_range(check,"group")
 
-# test_residual <- left_join(test_residual,cc_netzero,by="id")
-# test_residual <- left_join(test_residual,wd_scenarios_emissions_org %>% 
-#                              filter(var=="AR6 climate diagnostics|Infilled|Emissions|CO2") %>% 
-#                              select(id,year,native_CO2_emissions=value_gwp),
-#                            by = join_by(id, year))
-# 
-# test_nz_year <- test_residual %>%  
-#   select(id,year,native_CO2_emissions,recalulated_net_CO2_emissions,native_net_zero_year=net_zero_CO2) %>% 
-#   filter(recalulated_net_CO2_emissions<0) %>% 
-#   group_by(id) %>% 
-#   mutate(recalculated_net_zero_year=first(year))
-# 
-# blarg <- test_nz_year %>% 
-#   mutate(difference=recalculated_net_zero_year-native_net_zero_year) %>% 
-#   select(id,difference) %>% 
-#   distinct() %>% 
-#   filter(abs(difference)>5)
-# 
-# test_nz_year <- left_join(test_residual %>% 
-#                             select(id,year,native_CO2_emissions,recalulated_net_CO2_emissions,native_net_zero_year=net_zero_CO2),
-#                           blarg,by="id") %>% 
-#   filter(!is.na(difference))
-
-
 
 ```
 
@@ -419,7 +515,7 @@ wd_totals_co2 <- wd_scenarios_emissions %>%
   filter(!grepl("Carbon Sequestration",var)) %>% 
   filter(gas=="CO2") %>% 
   mutate(value=ifelse(is.na(value),0,value)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>% 
   group_by(id,category,year) %>% 
   summarise(value=sum(value)) %>% 
@@ -431,7 +527,7 @@ wd_totals_ghg <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
   mutate(value=ifelse(is.na(value),0,value)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>% 
   group_by(id,category,year) %>% 
   summarise(value=sum(value)) %>% 
@@ -569,7 +665,7 @@ wd_totals_summary <- rbind(wd_totals_summary,
 
 ## calculate reductions and join
 wd_total_reductions <- wd_scenarios_emissions %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>% 
   filter(gas=="CO2") %>% 
@@ -577,7 +673,7 @@ wd_total_reductions <- wd_scenarios_emissions %>%
   summarise(value=sum(value,na.rm=TRUE))
 
 wd_total_reductions <- rbind(wd_total_reductions,wd_scenarios_emissions %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>% 
   filter(var!="Kyoto Gases") %>% 
@@ -664,7 +760,7 @@ non_CO2 <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
   mutate(value=ifelse(is.na(value),0,value)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>%
   filter(gas!="CO2") %>% 
   group_by(id,category,year) %>% 
@@ -721,7 +817,7 @@ wd_gases <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
   mutate(value=ifelse(is.na(value),0,value)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>% 
   group_by(id,model,scenario,category,year,gas) %>% 
   summarise(value=sum(value,na.rm=TRUE))
@@ -732,7 +828,7 @@ wd_sectors <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
   mutate(value=ifelse(is.na(value),0,value)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>% 
   mutate(sector=as.character(sector)) %>% 
   mutate(sector=ifelse(sector %in% c("Industrial processes","F-Gases","Other"),"Other (Industrial processes, F-gases, other)",sector)) %>% 
@@ -751,9 +847,9 @@ wd_fuels <- data_r1 %>%
                     "Primary Energy|Gas|w/o CCS",
                     "Primary Energy|Oil|w/o CCS"))
 
-wd_fuels <- left_join(wd_fuels,cc_netzero,by="id") %>% 
-  filter(!is.na(net_zero_CO2)) %>% 
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+wd_fuels <- left_join(wd_fuels,wd_check_years,by="id") %>% 
+  filter(!is.na(native_net_zero_CO2)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   #mutate(include=ifelse(year==2050,1,0)) %>% 
   filter(include==1) %>% 
   select(-include)
@@ -873,13 +969,22 @@ wd_fuels_check <- left_join(wd_fuels_check,data.frame(var=c("Primary Energy|Rene
                              "Oil")),by="var")
 
 wd_fuels_check <- wd_fuels_check %>% 
-  group_by(id,year) %>% 
-  summarise(value=sum(value))
+  mutate(model=ifelse(grepl("IMAGE",model),"IMAGE",model)) %>% 
+  mutate(model=ifelse(grepl("REMIND",model),"REMIND",model)) %>% 
+  mutate(model=ifelse(grepl("MESSAGE",model),"MESSAGE",model)) %>% 
+  filter(year==2050)
 
+wd_fuels_check_totals <- wd_fuels_check 
 
-wd_fuels_check <- median_and_range(wd_fuels_check,c("year"))
+wd_fuels_check <- median_and_range(wd_fuels_check,c("model","var"))
+wd_fuels_check_totals <- median_and_range(wd_fuels_check_totals,c("var"))
+wd_fuels_check <- rbind(wd_fuels_check,wd_fuels_check_totals %>% mutate(model="all"))
 
+wd_fuels_check <- spread(wd_fuels_check,var,value)
 
+addWorksheet(wb_analysis,"fuel_at_2050")
+writeData(wb_analysis, sheet = "fuel_at_2050",
+          wd_fuels_check, colNames = T, rowNames = F)
 
 ```
 
@@ -974,7 +1079,7 @@ writeData(wb_figures, sheet = "fig_2a_gases",spread(wd_gases,gas,value)
 writeData(wb_figures, sheet = "fig_2b_sectors",spread(wd_sectors,sector,value)
           %>% arrange(model,desc(category),scenario), colNames = T, rowNames = F)
 writeData(wb_figures, sheet = "fig_2c_fuels",spread(wd_fuels %>% select(-fuel),var,value) %>% 
-            select(-net_zero_CO2,-net_zero_GHG) %>% 
+            select(-native_net_zero_CO2,-native_net_zero_CO2) %>% 
             select(id,model,scenario,category,year,everything()) %>% 
             arrange(model,desc(category),scenario), colNames = T, rowNames = F)
             
@@ -988,7 +1093,7 @@ wd_pca <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>%
   filter(!grepl("Carbon Sequestration",var)) %>%
   mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>% 
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
   filter(include==1) %>%
   group_by(id,model,var) %>%
   summarise(value=sum(value,na.rm=TRUE))
@@ -1042,7 +1147,7 @@ wd_clusters <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>%
   filter(!grepl("Carbon Sequestration",var)) %>%
   mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>%
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
   filter(include==1) %>%
   group_by(id,category,var) %>%
   summarise(value=sum(value,na.rm=TRUE))
@@ -1089,7 +1194,7 @@ wd_subsectors <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>%
   filter(!grepl("Carbon Sequestration",var)) %>%
   mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>%
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>%
   group_by(id,model,category,year,sector,var) %>%
@@ -1298,7 +1403,7 @@ cc_expl <- cc_expl %>%
 
 ## explanatory factors vs. total residual?
 wd_expl <- left_join(wd_scenarios_emissions,cc_expl,by="id") %>% 
-  mutate(include=ifelse(year==net_zero_CO2,1,0)) %>% 
+  mutate(include=ifelse(year==native_net_zero_CO2,1,0)) %>% 
   filter(include==1) %>% 
   select(-include) %>% 
   filter(var!="Kyoto Gases") %>% 
@@ -1453,7 +1558,7 @@ writeData(wb_analysis, sheet = "explanatory_vars",
 wd_standards <- wd_scenarios_emissions %>% 
   filter(var!="Kyoto Gases")%>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
-  mutate(include=ifelse(year==net_zero_CO2,1,0)) %>%
+  mutate(include=ifelse(year==native_net_zero_CO2,1,0)) %>%
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>% 
   select(-include)
@@ -1469,7 +1574,7 @@ wd_standards <- wd_standards %>%
 wd_standards_total <- wd_scenarios_emissions %>% 
   filter(var!="Kyoto Gases")%>% 
   filter(!grepl("Carbon Sequestration",var)) %>% 
-  mutate(include=ifelse(year==net_zero_CO2,1,0)) %>%
+  mutate(include=ifelse(year==native_net_zero_CO2,1,0)) %>%
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>% 
   select(-include)
@@ -1507,7 +1612,7 @@ wd_subsectors <- wd_scenarios_emissions %>%
   filter(var!="Kyoto Gases") %>%
   filter(!grepl("Carbon Sequestration",var)) %>%
   mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>%
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>%
   group_by(id,model,category,year,sector,var) %>%
@@ -1601,7 +1706,7 @@ wd_gases <- wd_scenarios_emissions %>%
   filter(gas!="F-Gases") %>% 
   filter(!grepl("Carbon Sequestration",var)) %>%
   mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(net_zero_CO2==year,1,0)) %>%
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
   mutate(include=ifelse(year==2020,1,include)) %>% 
   filter(include==1) %>%
   group_by(id,model,category,year,gas) %>%
@@ -1684,10 +1789,10 @@ p2 / p1 + plot_layout(heights=c(2,6))
 
 ``` {r save}
 
-
-addWorksheet(wb_analysis,"recalcd_vs_native_net_emissions")
-writeData(wb_analysis, sheet = "recalcd_vs_native_net_emissions",
-          test_residual %>% select(-difference_abs), colNames = T, rowNames = F)
+# 
+# addWorksheet(wb_analysis,"recalcd_vs_native_net_emissions")
+# writeData(wb_analysis, sheet = "recalcd_vs_native_net_emissions",
+#           test_residual %>% select(-difference_abs), colNames = T, rowNames = F)
 
 
 saveWorkbook(wb_figures,"Results/figure_data.xlsx",overwrite=T)
