@@ -1087,106 +1087,6 @@ writeData(wb_figures, sheet = "fig_2c_fuels",spread(wd_fuels %>% select(-fuel),v
 
 ```
 
-```{r plot_principal_components,fig.height=6,fig.width=8,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
-
-wd_pca <- wd_scenarios_emissions %>%
-  filter(var!="Kyoto Gases") %>%
-  filter(!grepl("Carbon Sequestration",var)) %>%
-  mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
-  filter(include==1) %>%
-  group_by(id,model,var) %>%
-  summarise(value=sum(value,na.rm=TRUE))
-
-wd_pca <- spread(wd_pca,var,value)
-pca <- prcomp(wd_pca %>% ungroup() %>% select(-id,-model),scale=TRUE)
-wd_pca <- cbind(wd_pca %>% select(id,model),pca$x)
-pca_variance <-get_eigenvalue(pca)$variance.percent
-sum(pca_variance[1:2])
-
-
-# colors=c("#e6550d","#3182bd","#31a354")
-# wd_pca %>% ggplot(.,aes(x=PC1,y=PC2,fill=model)) +
-#   geom_point(shape=21,size=3,alpha=0.6) +
-#   theme_wl() +
-#   scale_fill_manual(values=colors) +
-#   theme(legend.title=element_blank()) +
-#   labs(title=paste0("Principal components explaining ",signif(sum(pca_variance[1:2]),2), "% of residual\nsubsector emissions variance"))
-
-
-fviz_pca_biplot(pca, 
-                geom.ind = "point",
-                pointshape = 21,
-                pointsize = 3,
-                fill.ind = wd_pca$model,
-                col.ind = "black",
-                select.var = list(contrib= 12),
-                col.var = "black",
-                repel = TRUE        # Avoid label overplotting
-             ) + 
-  theme_wl() +
-  xlim(-4,4) +
-  ylim(-3,6) +
-  theme(legend.title=element_blank()) +
-  labs(title=paste0("Principal components and variables explaining\nvariance in residual subsector emissions"))
-
-# fviz_contrib(pca,
-#              choice = "var",
-#              axes = 1:2,
-#              fill="#3182bd") +
-#   coord_flip() +
-#   theme(axis.text.x = element_text(angle = 0,hjust=0.5),
-#         axis.title.y = element_blank())
-
-
-```
-
-```{r plot_cluster_analysis,fig.height=6,fig.width=8,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
-
-wd_clusters <- wd_scenarios_emissions %>%
-  filter(var!="Kyoto Gases") %>%
-  filter(!grepl("Carbon Sequestration",var)) %>%
-  mutate(value=ifelse(is.na(value),0,value)) %>%
-  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
-  filter(include==1) %>%
-  group_by(id,category,var) %>%
-  summarise(value=sum(value,na.rm=TRUE))
-
-wd_clusters <- spread(wd_clusters,var,value) %>%
-  ungroup()
-
-cc_clusters = wd_clusters %>%
-  select(id) %>% 
-  mutate(no_clusters=NA) %>% 
-  mutate(value=NA)
-
-for(x in 3:6) {
-  
-  wd_cluster_summary <- kmeans(scale(wd_clusters %>% select(-id,-category)),x,nstart=25)
-  
-  blarg <- cbind(cc_clusters %>% select(id),value=wd_cluster_summary$cluster) %>% 
-    mutate(no_clusters=x)
-  cc_clusters <- rbind(cc_clusters,blarg)
-  
-}
-
-cc_clusters <- left_join(cc_clusters %>% filter(!is.na(no_clusters)),wd_pca %>% select(id,model,PC1,PC2))
-cc_clusters <- cc_clusters %>% 
-  mutate(label=paste0(no_clusters," Clusters"))
-
-cc_clusters$value <- as.factor(cc_clusters$value)
-
-
-cc_clusters %>% ggplot(.,aes(x=PC1,y=PC2,fill=model)) +
-  geom_point(shape=21,size=3,alpha=0.6) +
-  theme_wl() +
-  facet_wrap(.~label) +
-  #theme(legend.position="none") +
-  labs(title=paste0("Principal components explaining ",signif(sum(pca_variance[1:2]),2), "% of residual subsector emissions variance"))
-
-
-```
-
 ```{r plot_subsectors,fig.height=9,fig.width=9,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
 
 ## get the scenario data
@@ -1358,6 +1258,21 @@ p3 <- wd_subsectors %>%
 
 p1 / p2 / p3
 
+
+
+## save plot data
+addWorksheet(wb_figures,"fig_3_subsectors")
+
+
+writeData(wb_figures, sheet = "fig_3_subsectors",
+          wd_subsectors %>% 
+            select(sector,model,var,year,value_rebased,percentile_5th,percentile_95th) %>%
+            arrange(sector,model,var,year) %>% 
+            mutate(year=ifelse(year==2050,"Net Zero","2020")),
+  colNames = T, rowNames = F)
+            
+
+
 ```
 
 ```{r residual_subsectors}
@@ -1392,6 +1307,107 @@ writeData(wb_analysis, sheet = "subsector_residual_at_nz",
           wd_subsectors_summary, colNames = T, rowNames = F)
 
 ```
+
+```{r plot_principal_components,fig.height=6,fig.width=8,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
+
+wd_pca <- wd_scenarios_emissions %>%
+  filter(var!="Kyoto Gases") %>%
+  filter(!grepl("Carbon Sequestration",var)) %>%
+  mutate(value=ifelse(is.na(value),0,value)) %>%
+  mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>% 
+  filter(include==1) %>%
+  group_by(id,model,var) %>%
+  summarise(value=sum(value,na.rm=TRUE))
+
+wd_pca <- spread(wd_pca,var,value)
+pca <- prcomp(wd_pca %>% ungroup() %>% select(-id,-model),scale=TRUE)
+wd_pca <- cbind(wd_pca %>% select(id,model),pca$x)
+pca_variance <-get_eigenvalue(pca)$variance.percent
+sum(pca_variance[1:2])
+
+
+# colors=c("#e6550d","#3182bd","#31a354")
+# wd_pca %>% ggplot(.,aes(x=PC1,y=PC2,fill=model)) +
+#   geom_point(shape=21,size=3,alpha=0.6) +
+#   theme_wl() +
+#   scale_fill_manual(values=colors) +
+#   theme(legend.title=element_blank()) +
+#   labs(title=paste0("Principal components explaining ",signif(sum(pca_variance[1:2]),2), "% of residual\nsubsector emissions variance"))
+
+
+fviz_pca_biplot(pca, 
+                geom.ind = "point",
+                pointshape = 21,
+                pointsize = 3,
+                fill.ind = wd_pca$model,
+                col.ind = "black",
+                select.var = list(contrib= 12),
+                col.var = "black",
+                repel = TRUE        # Avoid label overplotting
+             ) + 
+  theme_wl() +
+  xlim(-4,4) +
+  ylim(-3,6) +
+  theme(legend.title=element_blank()) +
+  labs(title=paste0("Principal components and variables explaining\nvariance in residual subsector emissions"))
+
+# fviz_contrib(pca,
+#              choice = "var",
+#              axes = 1:2,
+#              fill="#3182bd") +
+#   coord_flip() +
+#   theme(axis.text.x = element_text(angle = 0,hjust=0.5),
+#         axis.title.y = element_blank())
+
+
+```
+
+```{r plot_cluster_analysis,fig.height=6,fig.width=8,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
+
+# wd_clusters <- wd_scenarios_emissions %>%
+#   filter(var!="Kyoto Gases") %>%
+#   filter(!grepl("Carbon Sequestration",var)) %>%
+#   mutate(value=ifelse(is.na(value),0,value)) %>%
+#   mutate(include=ifelse(native_net_zero_CO2==year,1,0)) %>%
+#   filter(include==1) %>%
+#   group_by(id,category,var) %>%
+#   summarise(value=sum(value,na.rm=TRUE))
+# 
+# wd_clusters <- spread(wd_clusters,var,value) %>%
+#   ungroup()
+# 
+# cc_clusters = wd_clusters %>%
+#   select(id) %>% 
+#   mutate(no_clusters=NA) %>% 
+#   mutate(value=NA)
+# 
+# for(x in 3:6) {
+#   
+#   wd_cluster_summary <- kmeans(scale(wd_clusters %>% select(-id,-category)),x,nstart=25)
+#   
+#   blarg <- cbind(cc_clusters %>% select(id),value=wd_cluster_summary$cluster) %>% 
+#     mutate(no_clusters=x)
+#   cc_clusters <- rbind(cc_clusters,blarg)
+#   
+# }
+# 
+# cc_clusters <- left_join(cc_clusters %>% filter(!is.na(no_clusters)),wd_pca %>% select(id,model,PC1,PC2))
+# cc_clusters <- cc_clusters %>% 
+#   mutate(label=paste0(no_clusters," Clusters"))
+# 
+# cc_clusters$value <- as.factor(cc_clusters$value)
+# 
+# 
+# cc_clusters %>% ggplot(.,aes(x=PC1,y=PC2,fill=model)) +
+#   geom_point(shape=21,size=3,alpha=0.6) +
+#   theme_wl() +
+#   facet_wrap(.~label) +
+#   #theme(legend.position="none") +
+#   labs(title=paste0("Principal components explaining ",signif(sum(pca_variance[1:2]),2), "% of residual subsector emissions variance"))
+
+
+```
+
 
 ```{r plot_scenario_characteristics,fig.width=8,fig.height=9.5,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
 
@@ -1483,7 +1499,6 @@ writeData(wb_analysis, sheet = "explanatory_vars",
 
 
 ```{r plot_residual_after_nz,fig.height=8,fig.width=8,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
-
 
 
 # pd <- pd %>% 
@@ -1782,11 +1797,6 @@ p2 / p1 + plot_layout(heights=c(2,6))
 
 ```
 
-```{r plot_SoCDR_Ch7_b,fig.height=4,fig.width=7,fig.path="Results/",dev=c('png', 'pdf', 'svg'),dpi=300}
-
-
-```
-
 ``` {r save}
 
 # 
@@ -1795,15 +1805,14 @@ p2 / p1 + plot_layout(heights=c(2,6))
 #           test_residual %>% select(-difference_abs), colNames = T, rowNames = F)
 
 
-saveWorkbook(wb_figures,"Results/figure_data.xlsx",overwrite=T)
-saveWorkbook(wb_analysis,"Results/analysis.xlsx",overwrite=T)
-#saveWorkbook(wb_data,"Results/processed_data.xlsx",overwrite=T)
+saveWorkbook(wb_figures,"Results/residual-emissions-ERL-figure-data.xlsx",overwrite=T)
+saveWorkbook(wb_analysis,"Results/residual-emissions-ERL-analysis.xlsx",overwrite=T)
 
 
-# write.csv(wd_scenarios_emissions %>%
-#              filter(var!="Kyoto Gases") %>%
-#              filter(!grepl("Carbon Sequestration",var)),
-#           file="residual-emissions-ERL-processed-data.csv",sep=";")
+write.csv(wd_scenarios_emissions %>%
+             filter(var!="Kyoto Gases") %>%
+             filter(!grepl("Carbon Sequestration",var)),
+          file="Results/residual-emissions-ERL-processed-data.csv",sep=";")
 
 
 ```
